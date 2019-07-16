@@ -1,5 +1,6 @@
 import { isDate, isObject } from './util'
-
+import { curry, pipe } from 'ramda'
+type searchStringPart = { searchKey: string; searchValue: any }
 function encode(val: string): string {
   return encodeURIComponent(val)
     .replace(/%40/g, '@')
@@ -15,30 +16,22 @@ export function buildURL(url: string, params?: any) {
   if (!params) {
     return url
   }
-
-  //
-  let parts = Object.keys(params)
-    .filter(key => !(params[key] === null || typeof params[key] === 'undefined'))
-    .map(handleParams)
-  function handleParams(key: string) {
-    let val = params[key]
-    if (Array.isArray(val)) {
-      return val.map(stringifyValue).map(val => `${encode(key)}=${encode(val)}`)
-    }
-    return `${encode(key)}=${encode(val)}`
+  function retainExistingParams(parts: any[], url: string) {
+    return (url += url.indexOf('?') === -1 ? (parts[0] && '?') || '' : '&')
   }
-  let serializedParams = parts.join('&')
+  const parts = transformObjToArray(params)
+    .filter(ignoreNullOrUndefined)
+    .map(prefixKeyToValue)
 
-  if (serializedParams) {
-    const markIndex = url.indexOf('#')
-    if (markIndex !== -1) {
-      url = url.slice(0, markIndex)
-    }
+  const newUrl = pipe(
+    discardHashInURL,
+    curry(retainExistingParams)(parts)
+  )(url)
+  return newUrl + serializedParams(parts)
+}
 
-    url += (url.indexOf('?') === -1 ? '?' : '&') + serializedParams
-  }
-
-  return url
+function ignoreNullOrUndefined({ searchValue }: searchStringPart) {
+  return searchValue !== null && typeof searchValue !== 'undefined'
 }
 function stringifyValue(val: any) {
   if (isDate(val)) {
@@ -47,4 +40,30 @@ function stringifyValue(val: any) {
     return JSON.stringify(val)
   }
   return val
+}
+function transformObjToArray(obj: { [index: string]: any }) {
+  return Object.keys(obj).map(searchKey => {
+    return {
+      searchKey,
+      searchValue: obj[searchKey]
+    }
+  })
+}
+function prefixKeyToValue({ searchKey, searchValue }: searchStringPart) {
+  const finalSearchKey = Array.isArray(searchValue) ? `${searchKey}[]` : searchKey
+  const finalSearchValue = (Array.isArray(searchValue) ? searchValue : [searchValue])
+    .map(stringifyValue)
+    .map(stringifiedValue => composeKeyAndValue(finalSearchKey, stringifiedValue))
+  return serializedParams(finalSearchValue)
+}
+
+function composeKeyAndValue(key: string, value: string) {
+  return `${encode(key)}=${encode(value)}`
+}
+function serializedParams(parts: any) {
+  return parts.join('&')
+}
+function discardHashInURL(url: string) {
+  const markIndex = url.indexOf('#')
+  return markIndex !== -1 ? url.slice(0, markIndex) : url
 }
